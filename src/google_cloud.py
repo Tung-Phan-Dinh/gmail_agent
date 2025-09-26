@@ -408,10 +408,11 @@ class GmailWorkflow:
             if step <= 3:  # Changed from < 3 to <= 3 to include sending for step 3
                 # Only send reply if we have a proper AI-generated response
                 if message_body:
-                    # Display Rafael's response
-                    self.display_rafael_message(message_body, f"Rafael - Follow-up #{step + 1}")
 
                     self.send_reply_email(thread_id, message_body, message_body=message_body, message_subject=message_subject, name=name)
+
+                    # Display Rafael's response
+                    self.display_rafael_message(message_body, f"Rafael - Follow-up #{step + 1}")
                     
                     if step == 3:
                         # For step 3, mark as completed after sending
@@ -526,12 +527,29 @@ class GmailWorkflow:
             }
 
             # Send reply
-            
-            reply_response = self.service.users().messages().send(
-                userId='me', body=reply_message
-            ).execute()          
 
-            #Parse email from from_header to handle "Name <email>" format bug
+            # Send reply with retry logic
+            max_retries = 3
+            reply_response = None
+            try:
+                for attempt in range(max_retries):
+                    try:
+                        reply_response = self.service.users().messages().send(userId='me', body=reply_message).execute()
+                        console.print(f"[dim]DEBUG: Gmail API call succeeded for reply on attempt {attempt+1}[/dim]")
+                        break  # Success, exit loop
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            wait_time = 2 ** attempt  # 1s, 2s, 4s
+                            console.print(f"[yellow]Gmail reply send failed (attempt {attempt+1}): {e}. Retrying in {wait_time}s...[/yellow]")
+                            time.sleep(wait_time)
+                        else:
+                            console.print(f"[red]Gmail reply send failed after {max_retries} attempts: {e}[/red]")
+                            raise
+            except Exception as e:
+                console.print(f"[red]Error sending reply: {e}[/red]")
+                return  # Exit early if all retries failed
+
+            # Parse email from from_header to handle "Name <email>" format bug
             email_match = re.search(r'<([^>]+)>', from_header)
             user_email = email_match.group(1) if email_match else from_header
             
